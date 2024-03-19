@@ -1,0 +1,233 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.FormCosts..Create(BaseForm)
+Gui.FormCosts..Caption("Standard Cost Copy Maintenance [6568]")
+Gui.FormCosts..Size(518,346)
+Gui.FormCosts..MinX(0)
+Gui.FormCosts..MinY(0)
+Gui.FormCosts..Position(0,0)
+Gui.FormCosts..AlwaysOnTop(False)
+Gui.FormCosts..FontName("Tahoma")
+Gui.FormCosts..FontSize(8.25)
+Gui.FormCosts..ControlBox(True)
+Gui.FormCosts..MaxButton(True)
+Gui.FormCosts..MinButton(True)
+Gui.FormCosts..MousePointer(0)
+Gui.FormCosts..Moveable(True)
+Gui.FormCosts..Sizeable(True)
+Gui.FormCosts..ShowInTaskBar(True)
+Gui.FormCosts..TitleBar(True)
+Gui.FormCosts..Event(UnLoad,FormCosts_UnLoad)
+Gui.FormCosts.gsgcCosts.Create(GsGridControl)
+Gui.FormCosts.gsgcCosts.Enabled(True)
+Gui.FormCosts.gsgcCosts.Visible(True)
+Gui.FormCosts.gsgcCosts.Zorder(0)
+Gui.FormCosts.gsgcCosts.Size(495,248)
+Gui.FormCosts.gsgcCosts.Position(11,57)
+Gui.FormCosts.gsgcCosts.Anchor(15)
+Gui.FormCosts.cmdSave.Create(Button)
+Gui.FormCosts.cmdSave.Enabled(True)
+Gui.FormCosts.cmdSave.Visible(True)
+Gui.FormCosts.cmdSave.Zorder(0)
+Gui.FormCosts.cmdSave.Size(75,23)
+Gui.FormCosts.cmdSave.Position(431,20)
+Gui.FormCosts.cmdSave.Caption("Save")
+Gui.FormCosts.cmdSave.FontName("Tahoma")
+Gui.FormCosts.cmdSave.FontSize(8.25)
+Gui.FormCosts.cmdSave.Event(Click,cmdSave_Click)
+Gui.FormCosts.cmdSave.Anchor(9)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+V.Global.sError.Declare(String)
+
+Program.Sub.Preflight.End
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 14 December 2021
+'Customer: Diversified Labeling Solutions, quote number 12529
+'This program is a maintenance menu for ARC ID 6568.
+'It is triggered from a custom menu item under Inventory - Administration - Standard Cost Maintenance [6568]
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	F.Intrinsic.Control.CallSub(CheckTable)
+	F.Intrinsic.Control.CallSub(LoadData)
+	F.Intrinsic.Control.CallSub(LoadGrid)
+	
+	GUI.FormCosts..Show
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+Program.Sub.CheckTable.Start
+'This subroutine verifies if tables exists in DB, creates it if it doesn't
+F.Intrinsic.Control.Try
+
+	V.Local.bExists.Declare(Boolean)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.ODBC.Connection!Con.TableExists("GCG_6568_MM", V.Local.bExists)
+		F.Intrinsic.Control.If(V.Local.bExists, =, False)
+			F.ODBC.Connection!Con.Execute("CREATE TABLE GCG_6568_MM (CODE CHAR(3), COMPANY_NAME CHAR(50), COPY_FROM BIT, COPY_TO BIT);")
+		F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.CheckTable.End
+Program.Sub.LoadData.Start
+'This subroutine loads the data 
+F.Intrinsic.Control.Try
+
+	'To check if datatables already exists
+	F.Intrinsic.Control.If(V.DataTable.dtCosts.Exists)
+		F.Data.DataTable.Close("dtCosts")
+	F.Intrinsic.Control.EndIf
+	
+	F.ODBC.Connection!Con.OpenCommonConnection
+	f.Data.DataTable.CreateFromSQL("dtCosts", "Con", "select RTRIM(COCODE) COCODE, RTRIM(COMPANYNAME) COMPANYNAME from COMPANIES;", True)
+	F.ODBC.Connection!Con.Close
+	
+	'Addding columns to display checkboxes in the gv
+	F.Data.DataTable.AddColumn("dtCosts", "COPY_FROM", "Boolean")
+	F.Data.DataTable.AddColumn("dtCosts", "COPY_TO", "Boolean")
+	
+	'Getting data stored in custom table
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	f.Data.Dictionary.CreateFromSQL("dictTop", "Con", "select CODE, COPY_FROM from GCG_6568_MM;")
+	F.Data.Dictionary.SetDefaultReturn("dictTop", False)
+	F.Data.DataTable.FillFromDictionary("dtCosts", "dictTop", "COCODE", "COPY_FROM")
+	F.Data.Dictionary.Close("dictTop")
+	
+	f.Data.Dictionary.CreateFromSQL("dictTop", "Con", "select CODE, COPY_TO from GCG_6568_MM;")
+	F.Data.Dictionary.SetDefaultReturn("dictTop", False)
+	F.Data.DataTable.FillFromDictionary("dtCosts", "dictTop", "COCODE", "COPY_TO")
+	F.Data.Dictionary.Close("dictTop")
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.LoadData.End
+Program.Sub.LoadGrid.Start
+'This subroutine formats all the gv
+F.Intrinsic.Control.Try
+
+	GUI.FormCosts.gsgcCosts.AddGridviewFromDatatable("gvCosts","dtCosts")
+	
+	''General Gridview properties
+	gui.FormCosts.gsgcCosts.SetGridviewProperty("gvCosts", V.Enum.GridViewPropertyNames!EnableAppearanceOddRow, True)
+	gui.FormCosts.gsgcCosts.SetGridviewProperty("gvCosts", V.Enum.GridViewPropertyNames!RowAutoHeight, True)
+	gui.FormCosts.gsgcCosts.SetGridviewProperty("gvCosts", V.Enum.GridViewPropertyNames!EnableAppearanceFocusedRow, True) 
+		
+	''Column properties
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!Caption, "Code")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!Caption, "Company Name") 
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!Caption, "Copy From") 
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!Caption, "Copy To") 
+	
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!HeaderFontBold, True)
+	
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!MinWidth, 60)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!MinWidth, 120)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!MaxWidth, 80)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!MaxWidth, 80)
+	
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!HeaderHAlignment, "Center")
+	
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!CellHAlignment, "Center")
+	
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!AllowEdit, False)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!AllowEdit, False)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!AllowEdit, True)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!AllowEdit, True)
+	
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COCODE", V.Enum.ColumnPropertyNames!ReadOnly, True)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COMPANYNAME", V.Enum.ColumnPropertyNames!ReadOnly, True)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_FROM", V.Enum.ColumnPropertyNames!ReadOnly, False)
+	Gui.FormCosts.gsgcCosts.SetColumnProperty("gvCosts", "COPY_TO", V.Enum.ColumnPropertyNames!ReadOnly, False)
+	
+	'Displaying gv
+	GUI.FormCosts.gsgcCosts.MainView("gvCosts") 
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.LoadGrid.End
+Program.Sub.FormCosts_UnLoad.Start
+'Closes the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.con.exists,=,"1") 	
+    f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.End()
+
+Program.Sub.FormCosts_UnLoad.End
+Program.Sub.cmdSave_Click.Start
+'This subroutine saves/updates data in the custom table after the user clicks on the Save button
+F.Intrinsic.Control.Try
+
+	V.Local.iCounter.Declare(Long)
+	V.Local.sSQL.Declare(String)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.Intrinsic.Control.For(V.Local.iCounter, 0, V.DataTable.dtCosts.RowCount--, 1)
+	
+		F.Intrinsic.String.Build("select * from GCG_6568_MM where CODE = '{0}';", V.DataTable.dtCosts(V.Local.iCounter).COCODE!FieldValTrim, V.Local.sSQL)
+		F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+		
+		F.Intrinsic.Control.If(V.Local.sSQL, =, "")
+			F.Intrinsic.String.Build("insert into GCG_6568_MM(CODE, COMPANY_NAME, COPY_FROM, COPY_TO) values('{0}','{1}','{2}','{3}');", V.DataTable.dtCosts(V.Local.iCounter).COCODE!FieldValTrim, V.DataTable.dtCosts(V.Local.iCounter).COMPANYNAME!FieldValTrim, V.DataTable.dtCosts(V.Local.iCounter).COPY_FROM!FieldValLong, V.DataTable.dtCosts(V.Local.iCounter).COPY_TO!FieldValLong, V.Local.sSQL)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("update GCG_6568_MM set COPY_FROM = '{0}', COPY_TO = '{1}' where CODE = '{2}';", V.DataTable.dtCosts(V.Local.iCounter).COPY_FROM!FieldValLong, V.DataTable.dtCosts(V.Local.iCounter).COPY_TO!FieldValLong, V.DataTable.dtCosts(V.Local.iCounter).COCODE!FieldValTrim, V.Local.sSQL)
+		F.Intrinsic.Control.EndIf
+		
+		F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+		
+	F.Intrinsic.Control.Next(V.Local.iCounter)
+	F.ODBC.Connection!Con.Close
+	
+	F.Intrinsic.UI.Msgbox("Values have been saved.")
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.cmdSave_Click.End
+Program.Sub.CatchError.Start
+'To display the error
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Global.sError) 
+F.Intrinsic.UI.Msgbox(V.Global.sError)
+F.Intrinsic.Control.CallSub("FormCosts_UnLoad")
+Program.Sub.CatchError.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$apadilla$}$20220104170320506$}$Lag9STqBJOmNXSbd5+msRcBWPGz0aFqSzPePUG9qWbwMhTsYuIcRONAY2ecHO2oiyOpmUN7Qr421yZ4X6pmeMw==
+Program.Sub.Comments.End
