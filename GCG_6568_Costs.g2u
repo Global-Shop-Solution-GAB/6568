@@ -1,0 +1,303 @@
+﻿Program.Sub.Preflight.Start
+V.Global.sError.Declare(String)
+	
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 14 December 2021
+'Customer: Diversified Labeling Solutions, quote number 12529
+'This program propagates Standard Costs to other company codes after the process has been run in the main cc.
+'This program is triggered from Post Save button 10185 hook and Post process 56980 hook
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	V.Local.sSQL.Declare(String)
+	V.Local.sProgram.Declare(String)
+	v.Local.iUserID.Declare(Long)
+	v.Local.sJobStream.Declare(String)
+	v.Local.sMenuItem.Declare(String)
+	v.Local.sTime.Declare(String)
+
+	f.Intrinsic.Control.If(v.Caller.Hook,=,10185, "AND", V.Caller.Switches, =, "O")	
+		
+		'Get Job Stream
+		f.Global.Security.GetUserId(v.Caller.User,v.Caller.CompanyCode,v.Local.iUserID)
+		f.ODBC.Connection!Conx.OpenCommonConnection
+		f.Intrinsic.String.Build("Select Top 1 Job_Stream_ID from Menu_Process where Company_Code = '{0}' and User_ID = '{1}' and PID = '{2}'",v.Caller.CompanyCode,v.Local.iUserID,v.Caller.PID,v.Local.sSQL)		
+		f.ODBC.Connection!Conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sJobStream)
+		f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF.Not)
+			'Get Menu Item
+			F.Global.General.GetMenuPathFromJobstreamID(v.Local.sJobStream,v.Local.sMenuItem)
+		f.Intrinsic.Control.EndIf		
+		f.ODBC.Connection!Conx.Close
+	
+		'"Inventory > File > Update Inventory Cost > Open" = Jobstream 464
+		f.Intrinsic.Control.If(v.Local.sJobStream,=,464)
+			V.Local.sProgram.Set("INVMAIN")
+			F.Intrinsic.String.Build("select * from V_INVENTORY_COST where CHG_DATE = '{0}' and PART = '{2}' and LOCN = '{3}' and CHG_PGM = '{1}';", V.Ambient.Date.PervasiveDate, V.Local.sProgram,  V.Passed.000007.PSQLFriendly, V.Passed.000009, V.Local.sSQL)
+			
+			'Calling update costs sub
+			F.Intrinsic.Control.CallSub("UpdateCosts", "SQL", V.Local.sSQL)
+		
+		F.Intrinsic.Control.Else
+			F.Intrinsic.Control.CallSub("Unload")
+		f.Intrinsic.Control.EndIf	
+		
+	F.Intrinsic.Control.ElseIf(v.Caller.Hook,=,56980)
+		'"Inventory > Administration > "Update New Standard Costs", post process JB0306 hook, program 402
+		'"Inventory > Administration > "Std Cost Single Level Routers Only", post process JB0306 hook, program 1121
+		
+		'Setting JB0306 program start time.
+		V.Local.sTime.Set(V.Passed.GLOBAL)
+		
+		'Getting Job Stream
+		f.Global.Security.GetUserId(v.Caller.User,v.Caller.CompanyCode,v.Local.iUserID)
+		f.ODBC.Connection!Conx.OpenCommonConnection
+		f.Intrinsic.String.Build("Select Top 1 Job_Stream_ID from Menu_Process where Company_Code = '{0}' and User_ID = '{1}' and PID = '{2}'",v.Caller.CompanyCode,v.Local.iUserID,v.Caller.PID,v.Local.sSQL)
+		
+		f.ODBC.Connection!Conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sJobStream)
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+			
+			F.Intrinsic.String.Build("select * from V_INVENTORY_COST where CHG_DATE = '{0}' and CHG_TIME > '{1}' and CHG_PGM = '{2}' order by CHG_TIME DESC;", V.Ambient.Date.PervasiveDate, V.Local.sTime.FormatHH:MM:SS.000, V.Local.sJobStream, V.Local.sSQL)
+			
+			f.ODBC.Connection!Conx.Close
+			
+			'Calling update costs sub
+			F.Intrinsic.Control.CallSub("UpdateCosts", "SQL", V.Local.sSQL)
+			
+		F.Intrinsic.Control.Else
+			F.Intrinsic.Control.CallSub("Unload")
+		f.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.ElseIf(v.Caller.Hook,=,56955)
+		
+		'Storing the start time of JB0306 process to be later used in the post save hook.
+		V.Passed.GLOBAL.Set(V.Ambient.Now)
+	
+	f.Intrinsic.Control.EndIf		
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+Program.Sub.CatchError.Start
+'To display the error
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Global.sError) 
+F.Intrinsic.UI.Msgbox(V.Global.sError)
+F.Intrinsic.Control.CallSub("Unload")
+Program.Sub.CatchError.End
+Program.Sub.Unload.Start
+'Closes the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.conx.exists,=,"1") 	
+    f.ODBC.Connection!Conx.Close
+f.Intrinsic.Control.EndIf
+
+'Ending program
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+Program.Sub.UpdateCosts.Start
+'This subroutine updates the standard costs
+
+F.Intrinsic.Control.Try
+	
+	v.Local.sSourceCompany.Declare(String)
+	v.Local.sTargetCompany.Declare(String)
+	v.Local.iCounter.Declare(Long)
+	v.Local.iCounter2.Declare(Long)
+	V.Local.iQtyOnHand.Declare(Long)
+	v.Local.sPartData.Declare(String)
+	v.Local.sMessage.Declare(String)
+	v.Local.sLocation.Declare(String)
+	V.Local.fOldCost.Declare(Float)
+	V.Local.iTime.Declare(Long)
+	v.Local.sTime.Declare(String)
+	V.Local.sSQL.Declare(String)
+	V.Local.sPart.Declare(String)
+	V.Local.sP18Part.Declare(String)
+	
+	'Creating dt from all the updated parts
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	f.Data.DataTable.CreateFromSQL("dtCosts", "Con", V.Args.SQL, True)
+	
+	'Getting the source company code and all target ones
+	f.ODBC.Connection!Con.ExecuteAndReturn("select RTRIM(CODE) CODE from GCG_6568_MM where COPY_FROM = '1';",v.Local.sSourceCompany)
+	f.ODBC.Connection!Con.ExecuteAndReturn("select RTRIM(CODE) CODE from GCG_6568_MM where COPY_TO = '1';",v.Local.sTargetCompany)
+	F.ODBC.Connection!Con.Close
+	
+	'Looping through all the target company codes
+	F.Intrinsic.String.Split(V.Local.sTargetCompany, "#$#", V.Local.sTargetCompany)
+	F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sTargetCompany.UBound, 1)
+		
+		'Overriding company code to target company code
+		F.Global.General.OverrideCompany(V.Local.sTargetCompany(V.Local.iCounter))
+		
+		'Setting values
+		V.Local.sMessage.Set("")
+		
+		'Looping through all records in dt
+		F.Intrinsic.Control.For(V.Local.iCounter2, 0, V.DataTable.dtCosts.RowCount--, 1)
+			
+			V.Local.sPart.Set(V.DataTable.dtCosts(V.Local.iCounter2).PART!FieldValTrim)
+			
+			'Validating if part exists in target company code and if it has qty on-hand
+			F.ODBC.Connection!Conx.OpenCompanyConnection
+			F.Intrinsic.String.Build("select RTRIM(A.PART) PART, RTRIM(A.LOCATION) LOCATION, A.QTY_ONHAND, B.COST from V_INVENTORY_MSTR A LEFT JOIN V_INVENTORY_COST B ON A.PART = B.PART AND A.LOCATION = B.LOCN where A.PART = '{0}' and A.LOCATION = '{1}';", V.Local.sPart.PSQLFriendly, V.DataTable.dtCosts(V.Local.iCounter2).LOCN!FieldValTrim, V.Local.sSQL)
+			F.ODBC.Connection!Conx.ExecuteAndReturn(V.Local.sSQL, V.Local.sPartData)
+			F.ODBC.Connection!Conx.Close
+			
+			'If part exists, then we continue with the process. If the part doesn't exist in target company code, then do nothing.
+			F.Intrinsic.Control.If(V.Local.sPartData, <>, "")
+				
+				'Splitting returned variable to get the qty on hand 
+				F.Intrinsic.String.Split(V.Local.sPartData, "*!*", V.Local.sPartData)
+				V.Local.sLocation.Set(V.Local.sPartData(1))
+				V.Local.iQtyOnHand.Set(V.Local.sPartData(2))
+				V.Local.fOldCost.Set(V.Local.sPartData(3))
+				
+				'If qty on hand is 0, then update the cost. Don't update if it is not.
+				F.Intrinsic.Control.If(V.Local.iQtyOnHand, =, 0)
+		
+					'Deleting record in INVENTORY_COST
+					F.ODBC.Connection!Conx.OpenCompanyConnection
+					F.Intrinsic.String.Build("delete from INVENTORY_COST where PART = '{0}' and LOCN = '{1}';", V.Local.sPart.PSQLFriendly, V.Local.sLocation, V.Local.sSQL)
+					F.ODBC.Connection!Conx.Execute(V.Local.sSQL)
+					
+					'Inserting record in INVENTORY_COST
+					'Note: Customer specifically asked to take the total cost from source cc as the material and total cost in the target cc. All other types of costs must be 0.
+					F.Intrinsic.String.Build("insert into INVENTORY_COST (PART, LOCN, COST, MATL, LABOR, OVHD, OUTS, FREIGHT, OTH, CHG_DATE, CHG_TIME, CHG_BY, CHG_PGM) values('{0}','{1}','{2}','{2}','0','0','0','0','0','{3}','{4}','{5}','{6}');", V.Local.sPart.PSQLFriendly, V.DataTable.dtCosts(V.Local.iCounter2).LOCN!FieldValTrim,  V.DataTable.dtCosts(V.Local.iCounter2).COST!FieldVal, V.Ambient.Date.PervasiveDate, V.DataTable.dtCosts(V.Local.iCounter2).CHG_TIME!FieldVal, V.DataTable.dtCosts(V.Local.iCounter2).CHG_BY!FieldValTrim, V.DataTable.dtCosts(V.Local.iCounter2).CHG_PGM!FieldValTrim, V.Local.sSQL)
+					F.ODBC.Connection!Conx.Execute(V.Local.sSQL)
+					F.ODBC.Connection!Conx.Close
+	
+					'Getting P18 transaction record in source company
+					F.Global.General.OverrideCompany(V.Local.sSourceCompany)
+					F.ODBC.Connection!Conx.OpenCompanyConnection
+					F.Intrinsic.String.Build("select top 1 * from INVENTORY_HIST where PART = '{0}' and LOCATION = '{1}' and CODE_TRANSACTION = 'P18' and DATE_HISTORY = '{2}' order by INV_HIST_TIME desc;", V.Local.sPart.PSQLFriendly, v.Local.sLocation, V.Ambient.Date.FormatYYMMDD, V.Local.sSQL)
+					f.Data.DataTable.CreateFromSQL("dtP18", "Conx", V.Local.sSQL, True)
+					F.ODBC.Connection!Conx.Close
+					
+					'Creating P18 transaction record in destination company's INVENTORY_HIST table
+					F.Global.General.OverrideCompany(V.Local.sTargetCompany(V.Local.iCounter))
+					f.Data.DataTable.SetValue("dtP18", 0, "NEW_ONHAND", 0, "OLD_ONHAND", 0, "COST", 0, "NEW_OTH", 0, "NEW_FRGT", 0, "NEW_OUTS", 0, "NEW_OVHD", 0, "NEW_LABR", 0, "OLD_OTH", 0, "OLD_FRGT", 0, "OLD_OUTS", 0, "OLD_OVHD", 0, "OLD_LABR", 0, "OTH_VAR", 0, "FRGT_VAR", 0, "OUTS_VAR", 0, "OVHD_VAR", 0, "LABR_VAR", 0, "OTHER_COST", 0, "FREIGHT_COST", 0, "OUTS_COST", 0, "COST_OVERHEAD", 0, "COST_LABOR", 0, "NEW_INV_COST", V.DataTable.dtCosts(V.Local.iCounter2).COST!FieldVal, "OLD_INV_COST", V.Local.fOldCost, "NEW_MATL", V.DataTable.dtCosts(V.Local.iCounter2).COST!FieldVal, "OLD_MATL", V.Local.fOldCost, "MATL_VAR", 0, "COST_MATERIAL", 0)
+
+					'Validating if timestamp already exists in INVENTORY HIST. This table doesn't accept same timestamps.
+					F.ODBC.Connection!Conx.OpenCompanyConnection
+					F.Intrinsic.String.Build("select INV_HIST_TIME from INVENTORY_HIST where INV_HIST_TIME = '{0}';", V.DataTable.dtP18(0).INV_HIST_TIME!FieldValTrim, V.Local.sSQL)
+					F.ODBC.Connection!Conx.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+					F.ODBC.Connection!Conx.Close
+					
+					'false if the query returned results, which means that timestap already exists in INVENTORY_HIST
+					F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+						
+						'Adding a second to INV_HIST_TIME
+						V.Local.iTime.Set(V.DataTable.dtP18(0).INV_HIST_TIME!FieldVal)
+						F.Intrinsic.Math.Add(V.Local.iTime, 1, V.Local.iTime)
+						V.Local.sTime.Set(V.Local.iTime.String)
+						F.Data.DataTable.SetValue("dtP18", 0, "INV_HIST_TIME", V.Local.sTime)
+					
+					F.Intrinsic.Control.EndIf
+					
+					'INVENTORY_HIST keys: PART, LOCATION, DATE_HISTORY, INV_HIST_TIME
+					'Querying INVENTORY_HIST to validate if new combo of keys exist. If it does, add another second to it.
+					V.Local.sP18Part.Set(V.DataTable.dtP18(0).PART!FieldValTrim)
+					
+					F.ODBC.Connection!Conx.OpenCompanyConnection
+					F.Intrinsic.String.Build("select * from INVENTORY_HIST where PART = '{0}' and LOCATION = '{1}' and DATE_HISTORY = '{2}' and INV_HIST_TIME = '{3}';", V.Local.sP18Part.PSQLFriendly, V.DataTable.dtP18(0).LOCATION!FieldValTrim, V.DataTable.dtP18(0).DATE_HISTORY!FieldValTrim, V.DataTable.dtP18(0).INV_HIST_TIME!FieldValTrim, V.Local.sSQL)
+					F.ODBC.Connection!Conx.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+					F.ODBC.Connection!Conx.Close
+					
+					'false if the query returned results, true if no results
+					F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+						
+						V.Local.iTime.Set(V.DataTable.dtP18(0).INV_HIST_TIME!FieldVal)
+						F.Intrinsic.Math.Add(V.Local.iTime, 1, V.Local.iTime)
+						V.Local.sTime.Set(V.Local.iTime.String)
+						F.Data.DataTable.SetValue("dtP18", 0, "INV_HIST_TIME", V.Local.sTime)
+					
+					F.Intrinsic.Control.EndIf
+					
+					'Save dtP18 to INVENTORY_HIST
+					F.ODBC.Connection!Conx.OpenCompanyConnection
+					F.Data.DataTable.SaveToDB("dtP18", "Conx", "INVENTORY_HIST", "", "128")
+					F.ODBC.Connection!Conx.Close
+					
+					'Closing dt
+					F.Data.DataTable.Close("dtP18")
+					
+				F.Intrinsic.Control.Else
+					
+					'Part has on-hand quantity in the target company = customer doesn't want to update the cost.
+					f.Intrinsic.String.Build("{0}{1}• Part: '{2}' with location '{3}'", v.Local.sMessage, v.Ambient.NewLine, V.Local.sPart, V.Local.sLocation, v.Local.sMessage)
+				
+				F.Intrinsic.Control.EndIf
+	
+			F.Intrinsic.Control.EndIf
+	
+		F.Intrinsic.Control.Next(V.Local.iCounter2)
+		
+	'Displaying message to let the user know the parts that werent updated
+	F.Intrinsic.Control.If(v.Local.sMessage, <>, "")
+		f.Intrinsic.String.Build("The following part(s) were not updated due to on-hand inventory:{0}{1}", v.Ambient.NewLine, v.Local.sMessage, v.Local.sMessage)
+		F.Intrinsic.Control.CallSub("Logging", "Message", V.Local.sMessage)
+		F.Intrinsic.UI.Msgbox(V.Local.sMessage, "ARC 6568 - Standard Costs Update - PPL")
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.Next(V.Local.iCounter)
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdateCosts.End
+Program.Sub.Logging.Start
+F.Intrinsic.Control.Try
+
+	V.Local.sPath.Declare(String)
+	V.Local.sFile.Declare(String)
+	V.Local.bExists.Declare(Boolean)
+	V.Local.bExists2.Declare(Boolean)
+	V.Local.sMessage.Declare(String)
+	V.Local.sContents.Declare(String)
+	
+	V.Local.sMessage.Set(V.Args.Message)
+	
+	'Checking if log folder exists
+	F.Intrinsic.String.Build("{0}\CUSTOM\6568\LOG", V.Caller.GlobalDir, V.Local.sPath)
+	F.Intrinsic.File.DirExists(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		
+		F.Intrinsic.File.CreateDir(V.Local.sPath)
+	
+	F.Intrinsic.Control.EndIf
+	
+	'Checking if log file exists
+	F.Intrinsic.String.Build("{0}\6568 Log.txt", V.Local.sPath, V.Local.sFile)
+	
+	F.Intrinsic.File.Exists(V.Local.sFile, V.Local.bExists2)
+	F.Intrinsic.Control.If(V.Local.bExists2.Not)
+		
+		F.Intrinsic.String.Build("{0} {1}: Log Start", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Local.sContents)
+		F.Intrinsic.File.String2File(V.Local.sFile, V.Local.sContents)
+		
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("{0} {1}: {2}", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Local.sMessage, V.Local.sContents)
+	F.Intrinsic.File.Append2FileNewLine(V.Local.sFile, V.Local.sContents)
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Logging.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$apadilla$}$20220707173131135$}$Lag9STqBJOmNXSbd5+msRcBWPGz0aFqSzPePUG9qWbzWUUq4nb8Ze9bJOTVxMK4JmJUwQr/4o03b1Nh6CmcF+Q==
+Program.Sub.Comments.End
